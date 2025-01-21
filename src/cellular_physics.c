@@ -1,5 +1,10 @@
+#include <SDL3/SDL_oldnames.h>
 #define SDL_MAIN_USE_CALLBACKS 1
+
+#include <stdint.h>
+#include <string.h>
 #include <stdio.h>
+#include <stdbool.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_mouse.h>
 #include <SDL3/SDL_pixels.h>
@@ -13,9 +18,12 @@
 #include <SDL3/SDL_timer.h>
 #include <stdlib.h>
 
+// render constants
 #define FRAMERATE 60
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 768
+
+// cell grid constants
 #define CELL_SIZE 16
 #define CELL_WIDTH WINDOW_WIDTH / CELL_SIZE
 #define CELL_HEIGHT WINDOW_HEIGHT / CELL_SIZE
@@ -24,15 +32,28 @@ typedef enum cell_type {
     CELL_EMPTY,
     CELL_BLOCK,
     CELL_SAND,
-    CELL_WATER,
+    CELL_WATER, 
 } cell_type;
-#define NUM_CELL_TYPES 3
+#define NUM_CELL_TYPES 4
+
+typedef struct cell {
+    cell_type type;
+    uint8_t fill_percent;
+} cell;
 
 // application content
 static SDL_Window *window = NULL;
 static SDL_Renderer *renderer = NULL;
-static cell_type cell_grid[CELL_WIDTH][CELL_HEIGHT];
+static cell cell_grid[CELL_WIDTH][CELL_HEIGHT];
 static cell_type selected_cell_type = CELL_SAND;
+
+static SDL_Texture* test_texture;
+
+SDL_Point mouse_coord_to_cell(float x, float y);
+void draw_cell(int x, int y);
+void draw_grid();
+void shift_down(int x, int y);
+void process_tick();
 
 SDL_Point mouse_coord_to_cell(float x, float y) {
 
@@ -45,9 +66,14 @@ SDL_Point mouse_coord_to_cell(float x, float y) {
     };
 }
 
-void draw_cell(cell_type type, int x, int y) {
+void update_cell(cell_type type, uint8_t fill_percent, int x, int y) {
+    cell_grid[x][y].type = type;
+    cell_grid[x][y].fill_percent = fill_percent;
+}
+
+void draw_cell(int x, int y) {
     SDL_FRect cell = { x*CELL_SIZE, y*CELL_SIZE, CELL_SIZE, CELL_SIZE};
-    switch (type) {
+    switch (cell_grid[x][y].type) {
         case CELL_EMPTY:
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE);
             break;
@@ -77,15 +103,52 @@ void draw_grid() {
     SDL_RenderRect(renderer, &border);
 }
 
+void draw_block_selection_ui() {
+    const SDL_FRect ui_box = { (float)CELL_SIZE / 2, (float)CELL_SIZE / 2, test_texture->w / 2, test_texture->h / 2 };
+    SDL_FRect selection_sprite = { 0, 0, (float)test_texture->w / 2, (float)test_texture->h / 2 };
+    switch (selected_cell_type) {
+        case CELL_EMPTY:
+            selection_sprite.x = (float)test_texture->w / 2;
+            selection_sprite.y = (float)test_texture->h / 2;
+            SDL_RenderTexture(renderer, test_texture, &selection_sprite, &ui_box);
+            break;
+        case CELL_SAND:
+            selection_sprite.x = 0;
+            selection_sprite.y = (float)test_texture->h / 2;
+            SDL_RenderTexture(renderer, test_texture, &selection_sprite, &ui_box);
+            break;
+        case CELL_BLOCK:
+            selection_sprite.x = 0;
+            selection_sprite.y = 0;
+            SDL_RenderTexture(renderer, test_texture, &selection_sprite, &ui_box);
+            break;
+        case CELL_WATER:
+            selection_sprite.x = (float)test_texture->w / 2;
+            selection_sprite.y = 0;
+            SDL_RenderTexture(renderer, test_texture, &selection_sprite, &ui_box);
+            break;
+    }
+}
+
+void shift_down(int x, int y) {
+    if(cell_grid[x][y+1].type == CELL_EMPTY) {
+        cell current_cell = cell_grid[x][y];
+        update_cell(CELL_EMPTY, CELL_SIZE % 256, x, y);
+        update_cell(current_cell.type, current_cell.fill_percent, x, y + 1);
+    }
+}
+
 void process_tick() {
     // draw cell types
     for (int x = CELL_WIDTH; x >= 0; x--) {
         for(int y = CELL_HEIGHT-2; y >= 0; y--) {
-            if(cell_grid[x][y] == CELL_SAND) {
-                if(cell_grid[x][y+1] == CELL_EMPTY) {
-                    cell_grid[x][y] = CELL_EMPTY;
-                    cell_grid[x][y+1] = CELL_SAND;
-                }
+            switch (cell_grid[x][y].type) {
+                case CELL_WATER:
+                case CELL_SAND:
+                    shift_down(x, y);
+                    break;
+                default:
+                    break;
             }
         }
     }
@@ -109,10 +172,20 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char **argv) {
         return SDL_APP_FAILURE;
     }
 
-    memset(cell_grid, CELL_EMPTY, sizeof(cell_type) * CELL_WIDTH * CELL_HEIGHT);
+    const cell init_cell = { CELL_EMPTY, CELL_SIZE % 256 };
+    for (int x = 0; x < CELL_WIDTH; x++)
+        for(int y = 0; y < CELL_HEIGHT; y++)
+           cell_grid[x][y] = init_cell;
+
+    SDL_Surface* test_surface = SDL_LoadBMP("../assets/selection_ui_sprite_sheet.bmp");
+    if(!test_surface) { puts("broke"); } 
+    test_texture = SDL_CreateTextureFromSurface(renderer, test_surface);
+    if(!test_texture) { puts("broke"); } 
+    SDL_DestroySurface(test_surface);
 
     return SDL_APP_CONTINUE;
 }
+
 
 // main program loop
 SDL_AppResult SDL_AppIterate(void *appstate) {
@@ -123,34 +196,13 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     // draw cell types
     for (int x = 0; x < CELL_WIDTH; x++) {
         for(int y = 0; y < CELL_HEIGHT; y++) {
-            draw_cell(cell_grid[x][y], x, y);
+            draw_cell(x, y);
         }
-    }
-
-    system("clear");
-
-    // draw cell types
-    for (int y = 0; y < CELL_HEIGHT; y++) {
-        for(int x = 0; x < CELL_WIDTH; x++) {
-            switch(cell_grid[x][y]) {
-                case CELL_SAND:
-                    printf("s ");
-                    break;
-                case CELL_EMPTY:
-                    printf(". ");
-                    break;
-                case CELL_WATER:
-                    printf("w ");
-                    break;
-                case CELL_BLOCK:
-                    printf("b ");
-                    break;
-            }
-        }
-        printf("\n");
     }
 
     draw_grid();
+
+    draw_block_selection_ui();
 
     // process crude physics
     process_tick();
@@ -171,14 +223,25 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             if(event->button.button == SDL_BUTTON_LEFT) {
                 SDL_Point cell_pos = mouse_coord_to_cell(event->button.x, event->button.y);
-                cell_grid[cell_pos.x][cell_pos.y] = selected_cell_type;
+                update_cell(selected_cell_type, CELL_SIZE % 256, cell_pos.x, cell_pos.y);
             }
             break;
         case SDL_EVENT_MOUSE_MOTION:
             if(event->motion.state == SDL_BUTTON_LEFT) {
                 SDL_Point cell_pos = mouse_coord_to_cell(event->motion.x, event->motion.y);
-                cell_grid[cell_pos.x][cell_pos.y] = selected_cell_type;
+                update_cell(selected_cell_type, CELL_SIZE % 256, cell_pos.x, cell_pos.y);
             }
+            break;
+        case SDL_EVENT_MOUSE_WHEEL:
+            if(event->wheel.y > 0) {
+                // scrolled forward
+                selected_cell_type = (selected_cell_type + 1) % NUM_CELL_TYPES;
+            } else { 
+                // scrolled backward
+                selected_cell_type = (selected_cell_type - 1);
+                selected_cell_type = selected_cell_type == -1 ? NUM_CELL_TYPES - 1 : selected_cell_type;
+            }
+            printf("selected cell type: %d\n", selected_cell_type);
             break;
         default:
             break;
