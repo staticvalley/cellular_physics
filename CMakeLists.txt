@@ -20,5 +20,5 @@ target_include_directories(${PROJECT_NAME} PRIVATE include ${SDL3_INCLUDE_DIRS})
 if(CMAKE_BUILD_TYPE STREQUAL "debug")
     target_compile_options(${PROJECT_NAME} PRIVATE -g -O0 -Wall -Wextra)
 else()
-    target_compile_options(${PROJECT_NAME} PRIVATE) #-O3
+    target_compile_options(${PROJECT_NAME} PRIVATE -O3)
 endif()
